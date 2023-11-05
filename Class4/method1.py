@@ -8,8 +8,9 @@ from datetime import datetime
 import os
 
 #EXTRACT
-def etl_process(path, file_name):
+def etl_process(path, file_name, file_date):
     spark = SparkSession.builder.config("spark.driver.memory", "8g").config("spark.executor.cores",8).getOrCreate()
+    
     
     df = spark.read.json(path+file_name)
     df = df.select('_source.*')
@@ -23,7 +24,8 @@ def etl_process(path, file_name):
         .when((col("AppName") == 'SPORT'), "Thể Thao")
         .otherwise("Error"))
     
-    df = df.select('Contract','Type','TotalDuration')
+    df = df.withColumn('Date', sf.lit(file_date))
+    df = df.select('Contract','Type','TotalDuration', 'Date')
     df = df.filter(df.Type != 'Error')
     
     print('Finished Processing {}'.format(file_name))
@@ -33,7 +35,7 @@ def etl_process(path, file_name):
 def main_task(start_date_str, end_date_str):
     start_time = datetime.now()
     path = '/Users/habaokhanh/Study_BigData_Dataset/log_content/'
-    list_file = [file for file in os.listdir(path) if file != '.DS_Store']
+    list_file = sorted([file for file in os.listdir(path) if file != '.DS_Store'])
             
     result = None
     for file_name in list_file:
@@ -44,13 +46,13 @@ def main_task(start_date_str, end_date_str):
         end_date = datetime.strptime(end_date_str, "%Y%m%d").date()
 
         if start_date <= file_date <= end_date:
-            df = etl_process(path, file_name)
+            df = etl_process(path, file_name, file_date)
             if result is None:
                 result = df
             else:
                 result = result.union(df)
     
-    result = result.groupby('Contract','Type').sum()
+    result = result.groupby('Contract','Type','Date').sum()
     result = result.withColumnRenamed('sum(TotalDuration)','TotalDuration')
 
     #calc most_watch
@@ -62,7 +64,7 @@ def main_task(start_date_str, end_date_str):
         mostWatch = mostWatch.withColumnRenamed("Type","MostWatch")
         return mostWatch
 
-    final = result.groupBy("Contract").pivot("Type").sum("TotalDuration")
+    final = result.groupBy('Contract','Date').pivot("Type").sum("TotalDuration")
 
     final = final.withColumnRenamed('Giải Trí', 'RelaxDuration') \
         .withColumnRenamed('Phim Truyện', 'MovieDuration') \
