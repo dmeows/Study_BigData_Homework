@@ -1,0 +1,21 @@
+ETL Output :
+
+Contract , Most_Watch, Customer_Taste , Activeness 
+
+Most_Watch : so sánh mấy cái Duration , cái lớn nhất là cái most_watch 
+Type : Low engagement , normal engagement , high engagement ( dựa vào total duration ) ( dành cho mấy ông DA ) 
+Customer_Taste : check xem mấy cái TotalDuration >< 0 , concat mấy cái đó lại 
+ActiveNess : check coi User đó trong log tổng , active mấy ngày trong 30 ngày, chia 30 để ra % 
+Group : Được làm từ 3 chỉ số Most_Watch , Customer_Taste và Activeness , ví dụ như ông đó là Thích xem TV , active nhiều và chỉ xem TV .
+Làm xong thì import output vào SQL 
+
+Most watch : 5 
+Customer_Taste : 20 tastes 
+Activeness : 2 
+
+Output mong muốn sẽ là biết 1 khách hàng , thích xem gì nhất , thường hay xem nhóm app nào , và active ít hay nhiều 
+
+ví dụ khách hàng A , thích xem Phim nhất , thường hay xem phim kèm TV , active nhiều . 
+
+Group : A , Movie , Movie-TV , High 
+

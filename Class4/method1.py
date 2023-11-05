@@ -1,8 +1,13 @@
 from pyspark.sql import SparkSession
+from pyspark.sql.window import Window
 from pyspark.sql.functions import col, when
+from pyspark.sql.functions import row_number, desc
+import pyspark.sql.functions as sf
+
 from datetime import datetime
 import os
 
+#EXTRACT
 def etl_process(path, file_name):
     spark = SparkSession.builder.config("spark.driver.memory", "8g").config("spark.executor.cores",8).getOrCreate()
     
@@ -24,6 +29,7 @@ def etl_process(path, file_name):
     print('Finished Processing {}'.format(file_name))
     return df
 
+#TRANSFORM
 def main_task(start_date_str, end_date_str):
     start_time = datetime.now()
     path = '/Users/habaokhanh/Study_BigData_Dataset/log_content/'
@@ -46,6 +52,16 @@ def main_task(start_date_str, end_date_str):
     
     result = result.groupby('Contract','Type').sum()
     result = result.withColumnRenamed('sum(TotalDuration)','TotalDuration')
+
+    #calc most_watch
+    def most_watch_calc(result):
+        windowSpec = Window.partitionBy("Contract").orderBy(desc("TotalDuration"))
+        mostWatch = result.withColumn("rank",row_number().over(windowSpec))
+        mostWatch = mostWatch.filter(mostWatch.rank==1)
+        mostWatch = mostWatch.select("Contract", "Type")
+        mostWatch = mostWatch.withColumnRenamed("Type","MostWatch")
+        return mostWatch
+
     final = result.groupBy("Contract").pivot("Type").sum("TotalDuration")
 
     final = final.withColumnRenamed('Giải Trí', 'RelaxDuration') \
@@ -54,6 +70,18 @@ def main_task(start_date_str, end_date_str):
         .withColumnRenamed('Thể Thao', 'SportDuration') \
         .withColumnRenamed('Truyền Hình', 'TVDuration')
     
+    #calc customer_tase
+    def customer_tase_calc(final):
+        final = final.withColumn("RelaxDuration",when(col("RelaxDuration").isNotNull(),"Relax").otherwise(col("RelaxDuration")))
+        final = final.withColumn("MovieDuration",when(col("MovieDuration").isNotNull(),"Movie").otherwise(col("MovieDuration")))
+        final = final.withColumn("ChildDuration",when(col("ChildDuration").isNotNull(),"Child").otherwise(col("ChildDuration")))
+        final = final.withColumn("SportDuration",when(col("SportDuration").isNotNull(),"Sport").otherwise(col("SportDuration")))
+        final = final.withColumn("TVDuration",when(col("TVDuration").isNotNull(),"TV").otherwise(col("TVDuration")))
+
+        taste = final.withColumn('CustomerTaste', sf.concat_ws("-", *[i for i in final.columns if i != 'Contract']))
+        return taste
+    
+    #LOAD
     print('-----------Saving Data ---------')
     final.repartition(1).write.csv('/Users/habaokhanh/Study_BigData_Dataset/log_content/clean/df_clean1',header=True)
     
