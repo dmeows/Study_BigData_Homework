@@ -44,45 +44,80 @@ def main_task(start_date_str, end_date_str):
         
         start_date = datetime.strptime(start_date_str, "%Y%m%d").date()
         end_date = datetime.strptime(end_date_str, "%Y%m%d").date()
-
         if start_date <= file_date <= end_date:
             df = etl_process(path, file_name, file_date)
             if result is None:
                 result = df
             else:
                 result = result.union(df)
-    
-    result = result.groupby('Contract','Type','Date').sum()
-    result = result.withColumnRenamed('sum(TotalDuration)','TotalDuration')
-
-    #calc most_watch
-    def most_watch_calc(result):
-        windowSpec = Window.partitionBy("Contract").orderBy(desc("TotalDuration"))
-        mostWatch = result.withColumn("rank",row_number().over(windowSpec))
-        mostWatch = mostWatch.filter(mostWatch.rank==1)
-        mostWatch = mostWatch.select("Contract", "Type")
-        mostWatch = mostWatch.withColumnRenamed("Type","MostWatch")
-        return mostWatch
-
-    final = result.groupBy('Contract','Date').pivot("Type").sum("TotalDuration")
-
+                
+    result_group = result.groupby('Contract','Type').sum()
+    result_group = result_group.withColumnRenamed('sum(TotalDuration)','TotalDuration')
+    final = result_group.groupBy('Contract').pivot("Type").sum('TotalDuration')
     final = final.withColumnRenamed('Giải Trí', 'RelaxDuration') \
         .withColumnRenamed('Phim Truyện', 'MovieDuration') \
         .withColumnRenamed('Thiếu Nhi', 'ChildDuration') \
         .withColumnRenamed('Thể Thao', 'SportDuration') \
         .withColumnRenamed('Truyền Hình', 'TVDuration')
+
+    #calc most_watch
+    def most_watch_calc(result):
+        windowSpec = Window.partitionBy("Contract").orderBy(desc("TotalDuration"))
+        most_watch = result_group.withColumn("rank",row_number().over(windowSpec))
+        most_watch = most_watch.filter(most_watch.rank==1)
+        most_watch = most_watch.select("Contract", "Type")
+        most_watch = most_watch.withColumnRenamed("Type","MostWatch")
+        return most_watch
     
     #calc customer_tase
-    def customer_tase_calc(final):
+    def customer_taste_calc(final):
         final = final.withColumn("RelaxDuration",when(col("RelaxDuration").isNotNull(),"Relax").otherwise(col("RelaxDuration")))
         final = final.withColumn("MovieDuration",when(col("MovieDuration").isNotNull(),"Movie").otherwise(col("MovieDuration")))
         final = final.withColumn("ChildDuration",when(col("ChildDuration").isNotNull(),"Child").otherwise(col("ChildDuration")))
         final = final.withColumn("SportDuration",when(col("SportDuration").isNotNull(),"Sport").otherwise(col("SportDuration")))
         final = final.withColumn("TVDuration",when(col("TVDuration").isNotNull(),"TV").otherwise(col("TVDuration")))
-
-        taste = final.withColumn('CustomerTaste', sf.concat_ws("-", *[i for i in final.columns if i != 'Contract']))
+        
+        taste = final.withColumn('CustomerTaste', sf.concat_ws("-", *[i for i in final.columns if i != ['Contract']]))
+        taste = taste.select('Contract','CustomerTaste')
         return taste
     
+    #calc activeness
+    def calculate_active_rate(result):
+        active = result.groupby('Contract','Type','Date').sum()
+        active = active.withColumnRenamed('sum(TotalDuration)','TotalDuration')
+        active = active.groupBy('Contract','Date').pivot("Type").sum('TotalDuration')
+        active = active.withColumnRenamed('Giải Trí', 'RelaxDuration') \
+                        .withColumnRenamed('Phim Truyện', 'MovieDuration') \
+                        .withColumnRenamed('Thiếu Nhi', 'ChildDuration') \
+                        .withColumnRenamed('Thể Thao', 'SportDuration') \
+                        .withColumnRenamed('Truyền Hình', 'TVDuration')
+
+        active = active.filter((active.Date >= start_date) & (active.Date <= end_date))
+        active = active.withColumn("IsActive",
+                            sf.when((active.RelaxDuration > 0) | (active.MovieDuration > 0) | (active.ChildDuration > 0) | (active.SportDuration > 0) | (active.TVDuration > 0), 1)
+                            .otherwise(0))
+        
+        # total active dates for each user
+        total_days = (end_date-start_date).days+1
+        activeness = active.groupBy("Contract").agg(sf.sum("IsActive").alias("ActiveDays"))
+
+        # active rate for each user
+        activeness = activeness.withColumn("ActiveRate", (sf.col("ActiveDays") / sf.lit(total_days)).cast("double"))
+        
+        return activeness
+    
+    def df_combined(final, most_watch, customer_taste, activeness):
+        # 1st join with most_watch
+        final_combine = final.join(most_watch, on='Contract', how='left')
+
+        # 2nd join with customer_taste
+        final_combine = final_combine.join(customer_taste, on='Contract', how='left')
+
+        # 3rd join with activeness
+        final_combine = final_combine.join(activeness, on='Contract', how='left')
+
+        return final_combine
+
     #LOAD
     print('-----------Saving Data ---------')
     final.repartition(1).write.csv('/Users/habaokhanh/Study_BigData_Dataset/log_content/clean/df_clean1',header=True)
