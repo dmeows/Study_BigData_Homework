@@ -15,14 +15,15 @@ def etl_process(path, file_name, file_date):
     df = spark.read.json(path+file_name)
     df = df.select('_source.*')
     
+    tv_condition_list = ['CHANNEL', 'DSHD', 'KPLUS', 'KPlus']
+    movie_condition_list = ['VOD', 'FIMS_RES', 'BHD_RES', 'VOD_RES', 'FIMS', 'BHD', 'DANET']
     df = df.withColumn("Type",
-           when((col("AppName") == 'CHANNEL') | (col("AppName") =='DSHD')| (col("AppName") =='KPLUS')| (col("AppName") =='KPlus'), "Truyền Hình")
-        .when((col("AppName") == 'VOD') | (col("AppName") =='FIMS_RES')| (col("AppName") =='BHD_RES')| 
-              (col("AppName") =='VOD_RES')| (col("AppName") =='FIMS')| (col("AppName") =='BHD')| (col("AppName") =='DANET'), "Phim Truyện")
-        .when((col("AppName") == 'RELAX'), "Giải Trí")
-        .when((col("AppName") == 'CHILD'), "Thiếu Nhi")
-        .when((col("AppName") == 'SPORT'), "Thể Thao")
-        .otherwise("Error"))
+                       when(col("AppName").isin(*tv_condition_list), "Truyền Hình")
+                       .when(col("AppName").isin(*movie_condition_list),"Phim Truyện")
+                       .when(col("AppName") == 'RELAX', "Giải Trí")
+                       .when(col("AppName") == 'CHILD', "Thiếu Nhi")
+                       .when(col("AppName") == 'SPORT', "Thể Thao")
+                       .otherwise("Error"))
     
     df = df.withColumn('Date', sf.lit(file_date))
     df = df.select('Contract','Type','TotalDuration', 'Date')

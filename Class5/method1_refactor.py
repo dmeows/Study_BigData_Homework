@@ -18,11 +18,11 @@ def read_json_data(spark, path, file_name):
 
 
 def add_type_column(df):
-    condition_list = ['CHANNEL', 'DSHD', 'KPLUS', 'KPlus']
+    tv_condition_list = ['CHANNEL', 'DSHD', 'KPLUS', 'KPlus']
+    movie_condition_list = ['VOD', 'FIMS_RES', 'BHD_RES', 'VOD_RES', 'FIMS', 'BHD', 'DANET']
     df = df.withColumn("Type",
-                       when(col("AppName").isin(*condition_list), "Truyền Hình")
-                       .when(col("AppName").isin('VOD', 'FIMS_RES', 'BHD_RES', 'VOD_RES', 'FIMS', 'BHD', 'DANET'),
-                             "Phim Truyện")
+                       when(col("AppName").isin(*tv_condition_list), "Truyền Hình")
+                       .when(col("AppName").isin(*movie_condition_list),"Phim Truyện")
                        .when(col("AppName") == 'RELAX', "Giải Trí")
                        .when(col("AppName") == 'CHILD', "Thiếu Nhi")
                        .when(col("AppName") == 'SPORT', "Thể Thao")
@@ -48,18 +48,19 @@ def calculate_customer_taste(df):
             df = df.withColumn(column, when(col(column).isNotNull(), column.replace("Duration", "")))
     customer_taste = df.withColumn('CustomerTaste',
                                    sf.concat_ws("-", *[i for i in df.columns if 'Duration' in i]))
-    return customer_taste.select('Contract', 'CustomerTaste')
+    customer_taste = customer_taste.select('Contract', 'CustomerTaste')
+    return customer_taste
 
 
 def calculate_activeness(df, start_date, end_date):
-    df = df.groupBy('Contract', 'Date', 'Type').sum().withColumnRenamed('sum(TotalDuration)', 'TotalDuration')
-    for column in df.columns:
-        if 'Duration' in column:
-            df = df.withColumn(column, when(col(column).isNotNull(), 1).otherwise(0))
-            df = df.withColumn("IsActive", sf.sum(df[column]))
     total_days = (end_date - start_date).days + 1
-    activeness = df.groupBy("Contract").agg(sf.sum("IsActive").alias("ActiveDays"))
-    return activeness.withColumn("ActiveRate", (sf.col("ActiveDays") / sf.lit(total_days)).cast("double"))
+    
+    active = df.groupby('Contract', 'Date').agg((sf.sum('TotalDuration').alias('TotalDurationPerDay')))
+    active = active.withColumn("IsActive", sf.when(active.TotalDurationPerDay > 0, 1).otherwise(0))
+
+    activeness = active.groupBy("Contract").agg(sf.sum("IsActive").alias("ActiveDays"))
+    activeness = activeness.withColumn("ActiveRate", (sf.col("ActiveDays") / sf.lit(total_days)))
+    return activeness
 
 
 def join_dataframes(final_df, most_watched_df, customer_taste_df, activeness_df):
